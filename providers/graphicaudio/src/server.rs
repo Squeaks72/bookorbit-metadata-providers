@@ -10,7 +10,7 @@ use axum::{Json, Router};
 use serde_json::json;
 
 use crate::mapping::{
-    clean_query, map_product, product_links, rank, slug_matches, wanted_part, BookMetadata,
+    clean_query, map_product, product_id, product_links, rank, slug_matches, wanted_part, BookMetadata,
 };
 use crate::site::{Client, UpstreamError};
 use crate::{Config, VERSION};
@@ -100,7 +100,11 @@ async fn find(
         return Ok(Vec::new());
     }
     let part = wanted_part(raw);
-    let page = site.search_page(&query).await?;
+    let (landed, page) = site.search_page(&query).await?;
+    // A single hit redirects to the product's own page rather than a list.
+    if let Some(id) = product_id(&landed) {
+        return Ok(map_product(&page, &id).into_iter().collect());
+    }
     let mut ids: Vec<String> = product_links(&page)
         .into_iter()
         .filter(|id| slug_matches(id, &query))

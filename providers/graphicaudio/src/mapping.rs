@@ -62,7 +62,8 @@ macro_rules! re {
 }
 
 re!(SERIES, r#"(?s)class="series-name".*?<span[^>]*>(.*?)</span>"#);
-re!(EPISODE, r#"(?s)class="episode-name">\s*<span[^>]*>.*?</span>(.*?)</div>"#);
+// Unnumbered titles (a novella) have no "Episode number" label before the name.
+re!(EPISODE, r#"(?s)class="episode-name">\s*(?:<span[^>]*>.*?</span>)?(.*?)</div>"#);
 re!(AUTHOR, r#"itemprop="author">([^<]*)<"#);
 re!(RELEASED, r"Release Date:\s*([A-Za-z]{3,9})\.?\s+(\d{1,2}),\s*(\d{4})");
 re!(RUNNING, r"Running Time:\s*(?:(\d+)(?:\.(\d+))?)(?:&nbsp;|\s)*Hours?");
@@ -425,6 +426,16 @@ mod tests {
         assert_eq!(clean_query("Iron Flame (Part 1 of 2)"), "Iron Flame");
         assert_eq!(clean_query("Iron Flame"), "Iron Flame");
         assert!(slug_matches("the-empyrean-2-iron-flame-2-of-2", &clean_query(sent)));
+    }
+
+    #[test]
+    fn unnumbered_title_has_no_episode_label() {
+        let html = r#"<div class="series-name"><a><span aria-hidden="trie">The Empyrean</span></a></div>
+<div class="episode-name">
+Threshing Day                </div>"#;
+        let book = map_product(html, "the-empyrean-threshing-day").expect("a recording");
+        assert_eq!(book.title, "Threshing Day");
+        assert_eq!(book.series[0].sequence, "");
     }
 
     #[test]

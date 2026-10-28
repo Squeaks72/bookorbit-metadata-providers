@@ -5,7 +5,7 @@ mod site;
 use std::sync::Arc;
 use std::time::Duration;
 
-pub const VERSION: &str = "0.1.0-tim.2";
+pub const VERSION: &str = "0.1.0-tim.3";
 
 pub struct Config {
     pub auth_token: Option<String>,
