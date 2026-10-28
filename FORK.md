@@ -23,6 +23,13 @@ is a chapter here, not a volume.
 answers (BookOrbit keys its cache on it). If upstream changes that line in a rebase, take its number and
 keep the `-tim.N` suffix.
 
+## New provider: GraphicAudio (`providers/graphicaudio`)
+
+Not in upstream. Reads graphicaudio.net product pages (full-cast audiobooks, one entry per part,
+cast as narrators) for a dedicated audiobook library. Published as
+`ghcr.io/squeaks72/graphicaudio-provider`; `fork-build.yml` builds both providers. `VERSION` carries
+`-tim.N` like MangaBaka's.
+
 ## Conflict policy
 
 When upstream adds similar chapter handling, upstream wins: drop the patch.
