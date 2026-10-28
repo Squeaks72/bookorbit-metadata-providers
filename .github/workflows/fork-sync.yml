@@ -1,0 +1,115 @@
+name: Fork sync
+
+# Keeps this fork current with bookorbit/bookorbit-metadata-providers, then rebuilds the image.
+#
+# `main` is a pure mirror of upstream and is never committed to directly, so it can always be
+# fast-forwarded. `tim` is upstream plus the local patches (the chapter-aware MangaBaka query), and is
+# rebased onto the new `main` on every sync -- rebase rather than merge so the patch set stays a
+# readable list of commits on top of a known upstream, and so a patch that upstream has since adopted
+# disappears on its own instead of conflicting forever.
+#
+# Timing follows the Uchiyomi fork: Unraid's CA Auto Update pulls at 04:00 America/Chicago (09:00 UTC),
+# GitHub queues scheduled workflows under load and sometimes drops them, so there are two attempts, off
+# the top of the hour. The second is almost always a no-op: with `tim` already on top of upstream the sync
+# exits early and the build job never starts.
+#
+# A rebase that does not apply cleanly stops here and fails the run rather than forcing anything: a
+# silently dropped patch is worse than a stale image. The nightly cloud routine reads the failure and
+# repairs it.
+#
+# Pushing needs the SYNC_TOKEN secret (a fine-grained PAT on this repo, Contents and Workflows read/write)
+# only when upstream changes a file under .github/workflows/; GITHUB_TOKEN can never push one. Without it
+# everything else still works.
+#
+# Upstream's own workflows (publish.yml, test.yml) stay DISABLED here: a new one arrives enabled, so the
+# order below is rebase, push `tim` (the default branch registers any new workflow), disable anything that
+# is not fork-*.yml, and only then mirror `main`.
+
+on:
+  schedule:
+    - cron: '17 22 * * *'
+    - cron: '41 1 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: fork-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      changed: ${{ steps.rebase.outputs.changed }}
+      pushed_with_pat: ${{ steps.rebase.outputs.pushed_with_pat }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: tim
+          token: ${{ secrets.SYNC_TOKEN || github.token }}
+
+      - name: Rebase the patches onto upstream
+        id: rebase
+        env:
+          HAS_PAT: ${{ secrets.SYNC_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          git config user.name  "Squeaks72"
+          git config user.email "Squeaks72@users.noreply.github.com"
+          git remote add upstream https://github.com/bookorbit/bookorbit-metadata-providers.git
+          git fetch upstream main
+          echo "pushed_with_pat=$HAS_PAT" >> "$GITHUB_OUTPUT"
+
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "already on top of upstream/main"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          orig=$(git rev-parse HEAD)
+          if ! git rebase upstream/main; then
+            git rebase --abort || true
+            tag="tim-pre-sync-$(date -u +%Y%m%d)"
+            git tag -f "$tag" "$orig"
+            git push -f origin "refs/tags/$tag"
+            echo "::error title=Rebase conflict::the patches no longer apply on upstream/main (old stack kept as tag $tag)"
+            exit 1
+          fi
+
+          # fork-build.yml builds the pushed tree; a build that fails keeps the previous :latest.
+          git push --force-with-lease=tim:"$orig" origin tim
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Keep only the fork workflows enabled
+        if: steps.rebase.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows" --paginate --jq '.workflows[] | [.id, .path, .state] | @tsv' |
+          while IFS=$'\t' read -r id path state; do
+            case "$path" in
+              .github/workflows/fork-*.yml) ;;
+              *) [ "$state" = "active" ] && gh api -X PUT "repos/$GITHUB_REPOSITORY/actions/workflows/$id/disable" || true ;;
+            esac
+          done
+
+      - name: Mirror main
+        if: steps.rebase.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          git push origin upstream/main:refs/heads/main
+
+  build:
+    needs: sync
+    # A push made with a PAT triggers fork-build on its own; one made with GITHUB_TOKEN does not.
+    if: needs.sync.outputs.changed == 'true' && needs.sync.outputs.pushed_with_pat != 'true'
+    uses: ./.github/workflows/fork-build.yml
+    permissions:
+      contents: read
+      packages: write

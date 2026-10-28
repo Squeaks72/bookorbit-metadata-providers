@@ -64,6 +64,16 @@ fn regex(pattern: &str) -> Regex {
 static VOLUME: LazyLock<Regex> = LazyLock::new(|| {
     regex(r"(?i)(?:(?-u:\b)(?:vol(?:ume)?|v)\.?\s*|#\s*)0*([0-9]{1,4}(?:\.[0-9]+)?)(?-u:\b)")
 });
+// Fork addition: a chapter marker and everything after it. A library of single chapters names its files
+// "Blue Box - Chapter 211", "Attack on Titan - Episode 49", "Blue Box - # 211"; MangaBaka knows the series,
+// not the chapter, and its search finds nothing once the query carries the extra words. The marker has to
+// follow a separator, so the inside of a word ("Escape 5", "Batch 5") never counts, and something has to
+// stand before it, so a series that begins with one of these words keeps its name.
+static CHAPTER: LazyLock<Regex> = LazyLock::new(|| {
+    regex(
+        r"(?i)[\s,:;\-\x{2013}\x{2014}(\[]+(?:chapters?|chap|ch|episode|ep|class|lesson|round|act|issue|chapitre|cap[i\x{ed}]tulo|kapitel|#)\.?\s*0*[0-9]{1,4}(?:\.[0-9]+)?(?-u:\b).*$",
+    )
+});
 static EMPTY_BRACKETS: LazyLock<Regex> = LazyLock::new(|| regex(r"\(\s*\)|\[\s*\]"));
 static TRAILING_JUNK: LazyLock<Regex> =
     LazyLock::new(|| regex(r"[\s,.:;_\-\x{2013}\x{2014}(\[]+$"));
@@ -79,6 +89,12 @@ static BLANK_LINES: LazyLock<Regex> = LazyLock::new(|| regex(r"\n{3,}"));
 /// Takes a volume number off a search query: the title is what MangaBaka knows, the number is
 /// which book of it the file is.
 pub fn split_volume(query: &str) -> (String, String) {
+    // Fork addition: a chapter is not a volume. The chapter marker and what follows it come off and the
+    // number is dropped, so a chapter file gets its series and not a "Vol. 211" of it.
+    let query = match CHAPTER.find(query) {
+        Some(m) if !query[..m.start()].trim().is_empty() => query[..m.start()].trim(),
+        _ => query,
+    };
     let Some(captures) = VOLUME.captures(query) else {
         return (query.to_string(), String::new());
     };
@@ -406,12 +422,32 @@ mod tests {
             ("Berserk, Vol. 03", "Berserk", "3"),
             ("Berserk v12", "Berserk", "12"),
             ("Berserk volume 41", "Berserk", "41"),
-            ("One Piece #5", "One Piece", "5"),
+            ("One Piece #5", "One Piece", ""), // fork: a # number is a chapter
             ("Berserk (Vol 2)", "Berserk", "2"),
             ("Chainsaw Man Vol. 10.5", "Chainsaw Man", "10.5"),
             ("Mob Psycho 100", "Mob Psycho 100", ""),
             ("Revolutionary Girl Utena", "Revolutionary Girl Utena", ""),
             ("Vol. 3", "Vol. 3", ""),
+            // Fork: chapter files. The series comes back, the chapter number does not.
+            ("Blue Box - Chapter 211", "Blue Box", ""),
+            ("Blue Box - # 211", "Blue Box", ""),
+            ("Blue Box #211", "Blue Box", ""),
+            ("Attack on Titan - Episode 49", "Attack on Titan", ""),
+            (
+                "Assassination Classroom - Class 76",
+                "Assassination Classroom",
+                "",
+            ),
+            (
+                "Boruto - Naruto Next Generations - Chapter 64",
+                "Boruto - Naruto Next Generations",
+                "",
+            ),
+            ("Berserk - Ch. 12.5: The Title", "Berserk", ""),
+            ("Berserk Vol. 3 - Chapter 20", "Berserk", "3"),
+            ("Escape 5", "Escape 5", ""),
+            ("Chapter 92", "Chapter 92", ""),
+            ("Class 76", "Class 76", ""),
         ];
         for (query, title, volume) in cases {
             assert_eq!(
