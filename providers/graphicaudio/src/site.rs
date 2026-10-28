@@ -22,7 +22,7 @@ pub struct Client {
     http: reqwest::Client,
     next: Mutex<Instant>,
     interval: Duration,
-    pages: Mutex<HashMap<String, (Instant, String)>>,
+    pages: Mutex<HashMap<String, (Instant, String, String)>>,
 }
 
 impl Client {
@@ -42,18 +42,18 @@ impl Client {
         }
     }
 
-    /// The page a catalogue search lands on: the matching series page when the site has one, else
-    /// a result list.
-    pub async fn search_page(&self, query: &str) -> Result<String, UpstreamError> {
+    /// The page a catalogue search lands on, with the URL it ended at: the matching series page
+    /// when the site has one, the product's own page for a single hit, else a result list.
+    pub async fn search_page(&self, query: &str) -> Result<(String, String), UpstreamError> {
         self.get(&format!("/catalogsearch/result/?q={}", encode(query)))
             .await
     }
 
     pub async fn product_page(&self, id: &str) -> Result<String, UpstreamError> {
-        self.get(&format!("/{id}.html")).await
+        self.get(&format!("/{id}.html")).await.map(|(_, page)| page)
     }
 
-    async fn get(&self, path: &str) -> Result<String, UpstreamError> {
+    async fn get(&self, path: &str) -> Result<(String, String), UpstreamError> {
         if let Some(page) = self.cached(path) {
             return Ok(page);
         }
@@ -65,6 +65,7 @@ impl Client {
             .send()
             .await
             .map_err(|error| UpstreamError::Failed(error.to_string()))?;
+        let url = res.url().to_string();
         match res.status().as_u16() {
             404 => return Err(UpstreamError::NotFound),
             429 | 503 => {
@@ -96,27 +97,30 @@ impl Client {
             body.extend_from_slice(&chunk);
         }
         let page = String::from_utf8_lossy(&body).into_owned();
-        self.store(path, &page);
-        Ok(page)
+        self.store(path, &url, &page);
+        Ok((url, page))
     }
 
-    fn cached(&self, key: &str) -> Option<String> {
+    fn cached(&self, key: &str) -> Option<(String, String)> {
         let pages = self.pages.lock().expect("cache lock poisoned");
         pages
             .get(key)
-            .filter(|(at, _)| at.elapsed() < CACHE_TTL)
-            .map(|(_, page)| page.clone())
+            .filter(|(at, _, _)| at.elapsed() < CACHE_TTL)
+            .map(|(_, url, page)| (url.clone(), page.clone()))
     }
 
-    fn store(&self, key: &str, page: &str) {
+    fn store(&self, key: &str, url: &str, page: &str) {
         let mut pages = self.pages.lock().expect("cache lock poisoned");
         if pages.len() >= CACHE_LIMIT {
-            pages.retain(|_, (at, _)| at.elapsed() < CACHE_TTL);
+            pages.retain(|_, (at, _, _)| at.elapsed() < CACHE_TTL);
         }
         if pages.len() >= CACHE_LIMIT {
             pages.clear();
         }
-        pages.insert(key.to_string(), (Instant::now(), page.to_string()));
+        pages.insert(
+            key.to_string(),
+            (Instant::now(), url.to_string(), page.to_string()),
+        );
     }
 
     /// Spaces request starts at least `interval` apart, across all callers.
