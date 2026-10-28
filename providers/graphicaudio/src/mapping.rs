@@ -311,11 +311,20 @@ fn words(value: &str) -> BTreeSet<String> {
 /// `GraphicAudio`, `[Dramatized Adaptation]`.
 pub fn clean_query(query: &str) -> String {
     static NOISE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?i)\[[^\]]*\]|graphic\s*audio|dramati[sz]ed( adaptation)?|\(\s*\d+\s+of\s+\d+\s*\)")
-            .expect("valid pattern")
+        Regex::new(
+            r"(?i)\[[^\]]*\]|graphic\s*audio|dramati[sz]ed( adaptation)?|\(?\s*(?:part\s*)?\d+\s+of\s+\d+\s*\)?|\(\s*part\s*\d+\s*\)",
+        )
+        .expect("valid pattern")
     });
-    NOISE
-        .replace_all(query, " ")
+    let stripped = NOISE.replace_all(query, " ");
+    // File titles often read "Iron Flame (...): The Empyrean, Book 2". The slug carries the book's
+    // own title, so what follows the colon (series and number) would only rule every product out.
+    let title = match stripped.split_once(':') {
+        Some((head, _)) if !head.trim().is_empty() => head,
+        _ => &stripped,
+    };
+    title
+        .replace(['(', ')'], " ")
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
@@ -410,6 +419,12 @@ mod tests {
         assert!(!slug_matches("mistborn-2-the-well-of-ascension-1-of-3", "The Final Empire"));
         assert_eq!(wanted_part("The Final Empire (2 of 3)"), Some(2));
         assert_eq!(clean_query("The Final Empire (2 of 3) [GraphicAudio]"), "The Final Empire");
+        let sent = "Iron Flame (Part 2 of 2) (Dramatized Adaptation): The Empyrean, Book 2";
+        assert_eq!(clean_query(sent), "Iron Flame");
+        assert_eq!(wanted_part(sent), Some(2));
+        assert_eq!(clean_query("Iron Flame (Part 1 of 2)"), "Iron Flame");
+        assert_eq!(clean_query("Iron Flame"), "Iron Flame");
+        assert!(slug_matches("the-empyrean-2-iron-flame-2-of-2", &clean_query(sent)));
     }
 
     #[test]
