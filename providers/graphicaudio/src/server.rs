@@ -83,7 +83,11 @@ async fn search(
 
     let result = tokio::time::timeout(REQUEST_TIMEOUT, find(&state.site, raw, author, limit)).await;
     match result {
-        Ok(Ok(matches)) => Json(json!({ "matches": matches })).into_response(),
+        Ok(Ok(matches)) => {
+            let titles: Vec<&str> = matches.iter().map(|m| m.title.as_str()).collect();
+            eprintln!("[provider] [search] query={raw:?} author={author:?} limit={limit} -> {titles:?}");
+            Json(json!({ "matches": matches })).into_response()
+        }
         Ok(Err(err)) => upstream_error("search", err),
         Err(_) => upstream_error("search", UpstreamError::Failed("timed out".into())),
     }
