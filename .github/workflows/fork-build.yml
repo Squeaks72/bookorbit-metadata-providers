@@ -1,7 +1,7 @@
 name: Fork build
 
-# Builds the MangaBaka provider this fork runs on Unraid and publishes it to
-# ghcr.io/squeaks72/mangabaka-provider.
+# Builds the providers this fork runs on Unraid and publishes them to
+# ghcr.io/squeaks72/<provider>-provider (MangaBaka, GraphicAudio).
 #
 # Upstream's publish.yml builds any provider on a release tag, for two architectures. This box
 # needs one image, linux/amd64, of one provider, rebuilt whenever `tim` changes -- so this is much
@@ -15,6 +15,7 @@ on:
     branches: [tim]
     paths:
       - 'providers/mangabaka/**'
+      - 'providers/graphicaudio/**'
       - '.github/workflows/fork-build.yml'
   workflow_dispatch:
   workflow_call:
@@ -27,12 +28,15 @@ concurrency:
   group: fork-build
   cancel-in-progress: true
 
-env:
-  IMAGE: ghcr.io/squeaks72/mangabaka-provider
-
 jobs:
   build:
-    name: mangabaka / linux-amd64
+    name: ${{ matrix.provider }} / linux-amd64
+    strategy:
+      fail-fast: false
+      matrix:
+        provider: [mangabaka, graphicaudio]
+    env:
+      IMAGE: ghcr.io/squeaks72/${{ matrix.provider }}-provider
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -43,7 +47,7 @@ jobs:
         run: |
           set -euo pipefail
           # VERSION in main.rs is what /provider/info reports, and what BookOrbit keys its cache on.
-          version=$(sed -n 's/^pub const VERSION: &str = "\(.*\)";/\1/p' providers/mangabaka/src/main.rs)
+          version=$(sed -n 's/^pub const VERSION: &str = "\(.*\)";/\1/p' providers/${{ matrix.provider }}/src/main.rs)
           test -n "$version"
           sha=$(git rev-parse --short HEAD)
           echo "immutable=${version}-${sha}" >> "$GITHUB_OUTPUT"
@@ -61,7 +65,7 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: providers/mangabaka
+          context: providers/${{ matrix.provider }}
           platforms: linux/amd64
           push: true
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
