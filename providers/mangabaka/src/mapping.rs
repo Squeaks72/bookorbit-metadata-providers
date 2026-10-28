@@ -74,6 +74,12 @@ static CHAPTER: LazyLock<Regex> = LazyLock::new(|| {
         r"(?i)[\s,:;\-\x{2013}\x{2014}(\[]+(?:chapters?|chap|ch|episode|ep|class|lesson|round|act|issue|chapitre|cap[i\x{ed}]tulo|kapitel|#)\.?\s*0*[0-9]{1,4}(?:\.[0-9]+)?(?-u:\b).*$",
     )
 });
+// Fork addition: the chapter word is the source's own and cannot be listed ("Sakamoto Days - Days 240"). After the
+// series, a dash, then one or two words and a number is a chapter, whatever the word is. Needs the dash, so
+// "Mob Psycho 100" and "Fate - Zero" (no number) are left alone.
+static CHAPTER_SEGMENT: LazyLock<Regex> = LazyLock::new(|| {
+    regex(r"\s+-\s+[\p{L}.']+(?:\s+[\p{L}.']+)?\s+#?\s*0*[0-9]{1,4}(?:\.[0-9]+)?(?-u:\b).*$")
+});
 static EMPTY_BRACKETS: LazyLock<Regex> = LazyLock::new(|| regex(r"\(\s*\)|\[\s*\]"));
 static TRAILING_JUNK: LazyLock<Regex> =
     LazyLock::new(|| regex(r"[\s,.:;_\-\x{2013}\x{2014}(\[]+$"));
@@ -91,7 +97,7 @@ static BLANK_LINES: LazyLock<Regex> = LazyLock::new(|| regex(r"\n{3,}"));
 pub fn split_volume(query: &str) -> (String, String) {
     // Fork addition: a chapter is not a volume. The chapter marker and what follows it come off and the
     // number is dropped, so a chapter file gets its series and not a "Vol. 211" of it.
-    let query = match CHAPTER.find(query) {
+    let query = match CHAPTER.find(query).or_else(|| CHAPTER_SEGMENT.find(query)) {
         Some(m) if !query[..m.start()].trim().is_empty() => query[..m.start()].trim(),
         _ => query,
     };
@@ -445,6 +451,14 @@ mod tests {
             ),
             ("Berserk - Ch. 12.5: The Title", "Berserk", ""),
             ("Berserk Vol. 3 - Chapter 20", "Berserk", "3"),
+            ("Sakamoto Days - Days 240", "Sakamoto Days", ""),
+            (
+                "Boruto - Naruto Next Generations",
+                "Boruto - Naruto Next Generations",
+                "",
+            ),
+            ("Fate - Zero", "Fate - Zero", ""),
+            ("Mob Psycho 100", "Mob Psycho 100", ""),
             ("Escape 5", "Escape 5", ""),
             ("Chapter 92", "Chapter 92", ""),
             ("Class 76", "Class 76", ""),
