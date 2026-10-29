@@ -192,9 +192,14 @@ pub fn map_product(html: &str, id: &str) -> Option<BookMetadata> {
         .captures(html)
         .map(|caps| text(&caps[1]))
         .filter(|name| !name.is_empty());
-    let title = match episode.part {
-        Some((part, total)) if total > 1 => format!("{} ({part} of {total})", episode.title),
+    // The site titles some products only "Volume One" and leaves the book's name to the series.
+    let name = match &series {
+        Some(series) if is_generic(&episode.title) => format!("{series}: {}", episode.title),
         _ => episode.title.clone(),
+    };
+    let title = match episode.part {
+        Some((part, total)) if total > 1 => format!("{name} ({part} of {total})"),
+        _ => name,
     };
 
     let (published_date, published_year) = RELEASED
@@ -299,6 +304,37 @@ fn description(html: &str) -> String {
         .join("\n\n")
 }
 
+const NUMBER_WORDS: [&str; 12] = [
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+];
+
+fn number(token: &str) -> Option<u32> {
+    let token = token.to_lowercase();
+    token
+        .parse()
+        .ok()
+        .or_else(|| NUMBER_WORDS.iter().position(|word| *word == token).map(|i| i as u32 + 1))
+}
+
+re!(
+    GENERIC,
+    r"(?i)^(?:vol(?:ume)?\.?|book|part|episode|chapter)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)$"
+);
+re!(
+    VOLUME,
+    r"(?i)\b(?:vol(?:ume)?\.?|book|bk\.?)\s*(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b"
+);
+
+/// A title that names only a position in the series: "Volume One", "Book 2".
+fn is_generic(title: &str) -> bool {
+    GENERIC.is_match(title.trim())
+}
+
+/// The volume or book a query names: "White Sand: Volume One" is 1, "The Empyrean, Book 2" is 2.
+pub fn wanted_volume(query: &str) -> Option<u32> {
+    number(&VOLUME.captures(query)?[1])
+}
+
 fn words(value: &str) -> BTreeSet<String> {
     value
         .to_lowercase()
@@ -348,16 +384,30 @@ pub fn slug_matches(id: &str, query: &str) -> bool {
     !wanted.is_empty() && wanted.is_subset(&slug)
 }
 
-/// Best first: right part, then the author, then the shorter (closer) title.
-pub fn rank(mut found: Vec<BookMetadata>, query: &str, author: &str, part: Option<u32>) -> Vec<BookMetadata> {
+/// Best first: right part, then right volume, then the author, then the shorter (closer) title.
+pub fn rank(
+    mut found: Vec<BookMetadata>,
+    query: &str,
+    author: &str,
+    part: Option<u32>,
+    volume: Option<u32>,
+) -> Vec<BookMetadata> {
     let author_words = words(author);
     let query_words = words(query);
     found.sort_by_key(|book| {
         let part_matches = part.is_some_and(|part| book.title.contains(&format!("({part} of ")));
         let author_shared = words(&book.authors.join(" ")).intersection(&author_words).count();
         let extra = words(&book.title).difference(&query_words).count();
+        let volume_matches = volume.is_some_and(|volume| {
+            book.series
+                .first()
+                .and_then(|entry| entry.sequence.split('.').next())
+                .and_then(|whole| whole.parse::<u32>().ok())
+                == Some(volume)
+        });
         (
             std::cmp::Reverse(part_matches),
+            std::cmp::Reverse(volume_matches),
             std::cmp::Reverse(author_shared),
             extra,
         )
@@ -436,6 +486,20 @@ Threshing Day                </div>"#;
         let book = map_product(html, "the-empyrean-threshing-day").expect("a recording");
         assert_eq!(book.title, "Threshing Day");
         assert_eq!(book.series[0].sequence, "");
+    }
+
+    #[test]
+    fn volume_only_titles_take_the_series_name() {
+        let html = r#"<div class="series-name"><a><span aria-hidden="trie">White Sand</span></a></div>
+<div class="episode-name"><span class="screen-readers-only">Episode number </span>1 :   Volume One   </div>"#;
+        let book = map_product(html, "white-sand-volume-one").expect("a recording");
+        assert_eq!(book.title, "White Sand: Volume One");
+        assert_eq!(book.series[0].sequence, "1");
+        assert!(is_generic("Book 2") && !is_generic("Fourth Wing"));
+        assert_eq!(wanted_volume("White Sand: Volume One"), Some(1));
+        assert_eq!(wanted_volume("The Empyrean, Book 2"), Some(2));
+        assert_eq!(wanted_volume("Volume 12"), Some(12));
+        assert_eq!(wanted_volume("Iron Flame"), None);
     }
 
     #[test]

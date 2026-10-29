@@ -10,7 +10,8 @@ use axum::{Json, Router};
 use serde_json::json;
 
 use crate::mapping::{
-    clean_query, map_product, product_id, product_links, rank, slug_matches, wanted_part, BookMetadata,
+    clean_query, map_product, product_id, product_links, rank, slug_matches, wanted_part,
+    wanted_volume, BookMetadata,
 };
 use crate::site::{Client, UpstreamError};
 use crate::{Config, VERSION};
@@ -134,7 +135,7 @@ async fn find(
             Err(err) => return Err(err),
         }
     }
-    let mut ranked = rank(found, &query, author, part);
+    let mut ranked = rank(found, &query, author, part, wanted_volume(raw));
     ranked.truncate(limit);
     Ok(ranked)
 }
