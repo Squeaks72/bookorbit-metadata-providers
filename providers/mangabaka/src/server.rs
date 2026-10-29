@@ -12,7 +12,8 @@ use serde_json::json;
 
 use crate::mangabaka::{Client, Series, UpstreamError};
 use crate::mapping::{
-    author_matches, map_series, names_exactly, shares_a_word, split_volume, BookMetadata,
+    author_matches, map_series, names_exactly, names_no_series, shares_a_word, split_volume,
+    BookMetadata,
 };
 use crate::{Config, VERSION};
 
@@ -86,6 +87,10 @@ async fn search(
         .and_then(|v| v.parse::<usize>().ok())
         .map_or(DEFAULT_LIMIT, |n| n.clamp(1, MAX_LIMIT));
     let (title, volume) = split_volume(query);
+    // Fork: a bare "Chapter 3" or "# 22.5" is no series to look for (mapping.rs names_no_series).
+    if names_no_series(&title) {
+        return Json(json!({ "matches": [] })).into_response();
+    }
 
     let found =
         match tokio::time::timeout(REQUEST_TIMEOUT, state.mb.search_series(&title, limit)).await {

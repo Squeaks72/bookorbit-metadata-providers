@@ -80,6 +80,15 @@ static CHAPTER: LazyLock<Regex> = LazyLock::new(|| {
 static CHAPTER_SEGMENT: LazyLock<Regex> = LazyLock::new(|| {
     regex(r"\s+-\s+[\p{L}.']+(?:\s+[\p{L}.']+)?\s+#?\s*0*[0-9]{1,4}(?:\.[0-9]+)?(?-u:\b).*$")
 });
+// Fork addition: a query that names no series at all -- "Chapter 3", "# 22.5", "6" -- is a chapter that arrived without
+// its series (a title read before the series was in it). MangaBaka's search is fuzzy, so it answers with whatever
+// has "Chapter 3" or "2/5" in its name, and BookOrbit files the chapter under that series. An empty answer is
+// the honest one: it leaves the chapter where its folder put it.
+static BARE_CHAPTER: LazyLock<Regex> = LazyLock::new(|| {
+    regex(
+        r"(?i)^(?:(?:chapters?|chap|ch|episode|ep|class|lesson|round|act|issue|chapitre|cap[i\x{ed}]tulo|kapitel)\.?\s*#?|#)\s*0*[0-9]{1,4}(?:\.[0-9]+)?(?-u:\b).*$",
+    )
+});
 static EMPTY_BRACKETS: LazyLock<Regex> = LazyLock::new(|| regex(r"\(\s*\)|\[\s*\]"));
 static TRAILING_JUNK: LazyLock<Regex> =
     LazyLock::new(|| regex(r"[\s,.:;_\-\x{2013}\x{2014}(\[]+$"));
@@ -113,6 +122,12 @@ pub fn split_volume(query: &str) -> (String, String) {
         return (query.to_string(), String::new());
     }
     (rest, captures[1].to_string())
+}
+
+/// Fork addition: true when `title` (a query after `split_volume`) names no series: no letters at all, or only a
+/// chapter marker and its number.
+pub fn names_no_series(title: &str) -> bool {
+    !title.chars().any(char::is_alphabetic) || BARE_CHAPTER.is_match(title.trim())
 }
 
 pub fn map_series(s: &Series, volume: &str) -> BookMetadata {
@@ -420,6 +435,39 @@ mod tests {
     }
 
     const SERIES_1692: &str = include_str!("../testdata/series-1692.json");
+
+    #[test]
+    fn a_query_without_a_series_names_none() {
+        for bare in [
+            "Chapter 3",
+            "# 22.5",
+            "6",
+            "Ch. 12",
+            "Episode 49",
+            "Class 76",
+            "#5",
+            "2/5",
+        ] {
+            assert!(names_no_series(bare), "{bare}");
+        }
+        for named in [
+            "Blue Box",
+            "Mob Psycho 100",
+            "20th Century Boys",
+            "Zom 100",
+            "Episode",
+            "Chapter Zero",
+            "Class of 09",
+            "Attack on Titan",
+            "29 Years Old, Single, Living with the CEO?",
+            "100 Girlfriends Who Really Love You",
+            "86 Eighty-Six",
+            "2.5 Dimensional Seduction",
+            "5 Centimeters per Second",
+        ] {
+            assert!(!names_no_series(named), "{named}");
+        }
+    }
 
     #[test]
     fn splits_a_volume_off_the_query() {
