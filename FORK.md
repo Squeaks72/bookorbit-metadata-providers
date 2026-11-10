@@ -6,14 +6,14 @@ carrying one added provider, GraphicAudio, published as `ghcr.io/squeaks72/graph
 `ghcr.io/bookorbit/mangabaka-provider`.
 
 - `main` mirrors upstream (fast-forward only, never committed to). `tim` is the default branch:
-  upstream plus the patches below, rebased nightly by `fork-sync.yml`; `fork-build.yml` builds the image.
+  upstream plus the provider below, rebased nightly by `fork-sync.yml`; `fork-build.yml` builds the image.
 - Upstream's `publish.yml` and `test.yml` stay disabled here.
 
 ## New provider: GraphicAudio (`providers/graphicaudio`)
 
 Not in upstream. Reads graphicaudio.net product pages (full-cast audiobooks, one entry per part,
 cast as narrators) for a dedicated audiobook library. Published as
-`ghcr.io/squeaks72/graphicaudio-provider`; `fork-build.yml` builds both providers. `VERSION` carries
+`ghcr.io/squeaks72/graphicaudio-provider`; `fork-build.yml` builds it. `VERSION` carries
 a `-tim.N` suffix; bump N with every change to the provider's answers (BookOrbit keys its cache on it).
 
 ## Conflict policy
