@@ -64,31 +64,6 @@ fn regex(pattern: &str) -> Regex {
 static VOLUME: LazyLock<Regex> = LazyLock::new(|| {
     regex(r"(?i)(?:(?-u:\b)(?:vol(?:ume)?|v)\.?\s*|#\s*)0*([0-9]{1,4}(?:\.[0-9]+)?)(?-u:\b)")
 });
-// Fork addition: a chapter marker and everything after it. A library of single chapters names its files
-// "Blue Box - Chapter 211", "Attack on Titan - Episode 49", "Blue Box - # 211"; MangaBaka knows the series,
-// not the chapter, and its search finds nothing once the query carries the extra words. The marker has to
-// follow a separator, so the inside of a word ("Escape 5", "Batch 5") never counts, and something has to
-// stand before it, so a series that begins with one of these words keeps its name.
-static CHAPTER: LazyLock<Regex> = LazyLock::new(|| {
-    regex(
-        r"(?i)[\s,:;\-\x{2013}\x{2014}(\[]+(?:chapters?|chap|ch|episode|ep|class|lesson|round|act|issue|chapitre|cap[i\x{ed}]tulo|kapitel|#)\.?\s*0*[0-9]{1,4}(?:\.[0-9]+)?(?-u:\b).*$",
-    )
-});
-// Fork addition: the chapter word is the source's own and cannot be listed ("Sakamoto Days - Days 240"). After the
-// series, a dash, then one or two words and a number is a chapter, whatever the word is. Needs the dash, so
-// "Mob Psycho 100" and "Fate - Zero" (no number) are left alone.
-static CHAPTER_SEGMENT: LazyLock<Regex> = LazyLock::new(|| {
-    regex(r"\s+-\s+[\p{L}.']+(?:\s+[\p{L}.']+)?\s+#?\s*0*[0-9]{1,4}(?:\.[0-9]+)?(?-u:\b).*$")
-});
-// Fork addition: a query that names no series at all -- "Chapter 3", "# 22.5", "6" -- is a chapter that arrived without
-// its series (a title read before the series was in it). MangaBaka's search is fuzzy, so it answers with whatever
-// has "Chapter 3" or "2/5" in its name, and BookOrbit files the chapter under that series. An empty answer is
-// the honest one: it leaves the chapter where its folder put it.
-static BARE_CHAPTER: LazyLock<Regex> = LazyLock::new(|| {
-    regex(
-        r"(?i)^(?:(?:chapters?|chap|ch|episode|ep|class|lesson|round|act|issue|chapitre|cap[i\x{ed}]tulo|kapitel)\.?\s*#?|#)\s*0*[0-9]{1,4}(?:\.[0-9]+)?(?-u:\b).*$",
-    )
-});
 static EMPTY_BRACKETS: LazyLock<Regex> = LazyLock::new(|| regex(r"\(\s*\)|\[\s*\]"));
 static TRAILING_JUNK: LazyLock<Regex> =
     LazyLock::new(|| regex(r"[\s,.:;_\-\x{2013}\x{2014}(\[]+$"));
@@ -104,12 +79,6 @@ static BLANK_LINES: LazyLock<Regex> = LazyLock::new(|| regex(r"\n{3,}"));
 /// Takes a volume number off a search query: the title is what MangaBaka knows, the number is
 /// which book of it the file is.
 pub fn split_volume(query: &str) -> (String, String) {
-    // Fork addition: a chapter is not a volume. The chapter marker and what follows it come off and the
-    // number is dropped, so a chapter file gets its series and not a "Vol. 211" of it.
-    let query = match CHAPTER.find(query).or_else(|| CHAPTER_SEGMENT.find(query)) {
-        Some(m) if !query[..m.start()].trim().is_empty() => query[..m.start()].trim(),
-        _ => query,
-    };
     let Some(captures) = VOLUME.captures(query) else {
         return (query.to_string(), String::new());
     };
@@ -122,12 +91,6 @@ pub fn split_volume(query: &str) -> (String, String) {
         return (query.to_string(), String::new());
     }
     (rest, captures[1].to_string())
-}
-
-/// Fork addition: true when `title` (a query after `split_volume`) names no series: no letters at all, or only a
-/// chapter marker and its number.
-pub fn names_no_series(title: &str) -> bool {
-    !title.chars().any(char::is_alphabetic) || BARE_CHAPTER.is_match(title.trim())
 }
 
 pub fn map_series(s: &Series, volume: &str) -> BookMetadata {
@@ -437,79 +400,18 @@ mod tests {
     const SERIES_1692: &str = include_str!("../testdata/series-1692.json");
 
     #[test]
-    fn a_query_without_a_series_names_none() {
-        for bare in [
-            "Chapter 3",
-            "# 22.5",
-            "6",
-            "Ch. 12",
-            "Episode 49",
-            "Class 76",
-            "#5",
-            "2/5",
-        ] {
-            assert!(names_no_series(bare), "{bare}");
-        }
-        for named in [
-            "Blue Box",
-            "Mob Psycho 100",
-            "20th Century Boys",
-            "Zom 100",
-            "Episode",
-            "Chapter Zero",
-            "Class of 09",
-            "Attack on Titan",
-            "29 Years Old, Single, Living with the CEO?",
-            "100 Girlfriends Who Really Love You",
-            "86 Eighty-Six",
-            "2.5 Dimensional Seduction",
-            "5 Centimeters per Second",
-        ] {
-            assert!(!names_no_series(named), "{named}");
-        }
-    }
-
-    #[test]
     fn splits_a_volume_off_the_query() {
         let cases = [
             ("Berserk Vol. 3", "Berserk", "3"),
             ("Berserk, Vol. 03", "Berserk", "3"),
             ("Berserk v12", "Berserk", "12"),
             ("Berserk volume 41", "Berserk", "41"),
-            ("One Piece #5", "One Piece", ""), // fork: a # number is a chapter
+            ("One Piece #5", "One Piece", "5"),
             ("Berserk (Vol 2)", "Berserk", "2"),
             ("Chainsaw Man Vol. 10.5", "Chainsaw Man", "10.5"),
             ("Mob Psycho 100", "Mob Psycho 100", ""),
             ("Revolutionary Girl Utena", "Revolutionary Girl Utena", ""),
             ("Vol. 3", "Vol. 3", ""),
-            // Fork: chapter files. The series comes back, the chapter number does not.
-            ("Blue Box - Chapter 211", "Blue Box", ""),
-            ("Blue Box - # 211", "Blue Box", ""),
-            ("Blue Box #211", "Blue Box", ""),
-            ("Attack on Titan - Episode 49", "Attack on Titan", ""),
-            (
-                "Assassination Classroom - Class 76",
-                "Assassination Classroom",
-                "",
-            ),
-            (
-                "Boruto - Naruto Next Generations - Chapter 64",
-                "Boruto - Naruto Next Generations",
-                "",
-            ),
-            ("Berserk - Ch. 12.5: The Title", "Berserk", ""),
-            ("Berserk Vol. 3 - Chapter 20", "Berserk", "3"),
-            ("Sakamoto Days - Days 240", "Sakamoto Days", ""),
-            (
-                "Boruto - Naruto Next Generations",
-                "Boruto - Naruto Next Generations",
-                "",
-            ),
-            ("Fate - Zero", "Fate - Zero", ""),
-            ("Mob Psycho 100", "Mob Psycho 100", ""),
-            ("Escape 5", "Escape 5", ""),
-            ("Chapter 92", "Chapter 92", ""),
-            ("Class 76", "Class 76", ""),
         ];
         for (query, title, volume) in cases {
             assert_eq!(
