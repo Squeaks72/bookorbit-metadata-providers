@@ -1,7 +1,7 @@
 name: Fork build
 
 # Builds the providers this fork runs on Unraid and publishes them to
-# ghcr.io/squeaks72/<provider>-provider (MangaBaka, GraphicAudio).
+# ghcr.io/squeaks72/<provider>-provider (GraphicAudio).
 #
 # Upstream's publish.yml builds any provider on a release tag, for two architectures. This box
 # needs one image, linux/amd64, of one provider, rebuilt whenever `tim` changes -- so this is much
@@ -14,7 +14,6 @@ on:
   push:
     branches: [tim]
     paths:
-      - 'providers/mangabaka/**'
       - 'providers/graphicaudio/**'
       - '.github/workflows/fork-build.yml'
   workflow_dispatch:
@@ -34,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        provider: [mangabaka, graphicaudio]
+        provider: [graphicaudio]
     env:
       IMAGE: ghcr.io/squeaks72/${{ matrix.provider }}-provider
     runs-on: ubuntu-latest

@@ -3,7 +3,7 @@ name: Fork sync
 # Keeps this fork current with bookorbit/bookorbit-metadata-providers, then rebuilds the image.
 #
 # `main` is a pure mirror of upstream and is never committed to directly, so it can always be
-# fast-forwarded. `tim` is upstream plus the local patches (the chapter-aware MangaBaka query), and is
+# fast-forwarded. `tim` is upstream plus the local additions (the GraphicAudio provider), and is
 # rebased onto the new `main` on every sync -- rebase rather than merge so the patch set stays a
 # readable list of commits on top of a known upstream, and so a patch that upstream has since adopted
 # disappears on its own instead of conflicting forever.
